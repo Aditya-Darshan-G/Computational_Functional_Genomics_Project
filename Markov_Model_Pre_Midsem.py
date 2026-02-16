@@ -705,7 +705,7 @@ def main():
     print(f"{'='*80}")
     
     # Initialize KFold splitter (sequential, no shuffle)
-    kfold = KFold(n_splits=k, shuffle=False)
+    kfold = KFold(n_splits=k, shuffle=True, random_state=42)  # Shuffle for better randomness
     
     # Store metrics for all folds
     all_metrics = []
