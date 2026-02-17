@@ -4,6 +4,10 @@ simplerVersion.py
 
 Takes 2 arguments: FASTA file and Markov model order m
 Trains a Markov model on all sequences and prints log likelihood scores
+
+To run the code:
+python simplerVersion.py <fasta_file> <m>
+
 """
 
 import sys
