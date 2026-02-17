@@ -1,16 +1,20 @@
 """
 cfg_project_markov_model_intermediate_milestone.py
 
+
 Markov Model-based Transcription Factor Binding Site Predictor
 Computational Functional Genomics Project - Intermediate Milestone
+
 
 This script builds separate Markov models for bound (B) and unbound (U) sequences,
 performs k-fold cross-validation, and evaluates prediction performance.
 """
 
+
 # ===========================
 # IMPORT REQUIRED LIBRARIES
 # ===========================
+
 
 import argparse  # For parsing command-line arguments
 import json  # For reading/writing JSON files
@@ -27,12 +31,15 @@ import warnings  # For suppressing warnings
 warnings.filterwarnings('ignore')  # Suppress sklearn warnings
 import time  # for timing the code
 from datetime import timedelta  # For pretty time formatting
+from multiprocessing import Pool  # For parallel processing across folds
+
 
 
 # ===========================
 # PARSE COMMAND-LINE ARGUMENTS
 # ===========================
 # This section defines what arguments the user must provide when running the script
+
 
 def parse_arguments():
     """
@@ -47,6 +54,8 @@ def parse_arguments():
     
     Optional arguments:
     - pseudocount: Laplace smoothing pseudocount (default: 0.01)
+    - unseen_kmer_prob: Probability for unseen k-mers (default: 0.01)
+    - n_jobs: Number of CPU cores for parallel processing (default: -1)
     
     Returns:
     - Parsed arguments object
@@ -71,6 +80,10 @@ def parse_arguments():
     # Optional arguments
     parser.add_argument('--pseudocount', type=float, default=0.01,
                         help='Pseudocount for Laplace smoothing (default: 0.01)')
+    parser.add_argument('--unseen_kmer_prob', type=float, default=0.01,
+                        help='Probability for unseen k-mers (default: 0.01)')
+    parser.add_argument('--n_jobs', type=int, default=-1,
+                        help='Number of CPU cores for parallel processing (default: 1)')
     
     args = parser.parse_args()
     
@@ -83,10 +96,12 @@ def parse_arguments():
     return args
 
 
+
 # ===========================
 # INITIALIZE MARKOV MODEL STRUCTURES
 # ===========================
 # This section creates the initial data structures for storing Markov model parameters
+
 
 def initialize_markov_model(m):
     """
@@ -128,17 +143,20 @@ def initialize_markov_model(m):
     # Each k-mer maps to [P(A), P(C), P(G), P(T)]
     markov_model = {kmer: [0.0, 0.0, 0.0, 0.0] for kmer in kmers}
     
-    # Initialize markov_counts with all counts set to (0, 0, 0, 0)
+    # Initialize markov_counts as a defaultdict so that only observed k-mers
+    # are stored; unseen k-mers will be created lazily when first encountered.
     # Each k-mer maps to (count_A, count_C, count_G, count_T)
-    markov_counts = {kmer: [0, 0, 0, 0] for kmer in kmers}
+    markov_counts = defaultdict(lambda: [0, 0, 0, 0])
     
     return markov_model, markov_counts
+
 
 
 # ===========================
 # LOAD AND PARSE TSV DATA
 # ===========================
 # This section reads the chromosome data from the TSV file
+
 
 def load_tsv_data(tsv_path, tf_name):
     """
@@ -174,10 +192,12 @@ def load_tsv_data(tsv_path, tf_name):
     return data
 
 
+
 # ===========================
 # EXTRACT DNA SEQUENCES FROM GENOME
 # ===========================
 # This section extracts DNA sequences for each genomic bin using pyfaidx
+
 
 def extract_sequence(genome, chrom, start, end):
     """
@@ -213,10 +233,12 @@ def extract_sequence(genome, chrom, start, end):
         return None
 
 
+
 # ===========================
 # TRAIN MARKOV MODEL ON SEQUENCES
 # ===========================
 # This section trains the Markov model by counting k-mer transitions
+
 
 def train_markov_model(sequences, m, markov_counts):
     """
@@ -274,10 +296,12 @@ def train_markov_model(sequences, m, markov_counts):
     return markov_counts
 
 
+
 # ===========================
 # COMPUTE TRANSITION PROBABILITIES
 # ===========================
 # This section converts counts to probabilities using Laplace smoothing
+
 
 def compute_probabilities(markov_counts, pseudocount):
     """
@@ -312,12 +336,14 @@ def compute_probabilities(markov_counts, pseudocount):
     return markov_model
 
 
+
 # ===========================
 # CALCULATE LOG PROBABILITY OF SEQUENCE
 # ===========================
 # This section calculates the log probability of a sequence under a Markov model
 
-def calculate_log_probability(sequence, markov_model, m):
+
+def calculate_log_probability(sequence, markov_model, m, unseen_kmer_prob=0.01):
     """
     Calculate the log probability of a sequence under a given Markov model.
     
@@ -328,6 +354,7 @@ def calculate_log_probability(sequence, markov_model, m):
     - sequence: DNA sequence (string)
     - markov_model: Dictionary with k-mers as keys and probability lists as values
     - m: Order of Markov model
+    - unseen_kmer_prob: Probability to use for unseen k-mers (default: 0.01)
     
     Returns:
     - log_prob: Log probability of the sequence
@@ -361,7 +388,12 @@ def calculate_log_probability(sequence, markov_model, m):
         
         # Get transition probability from model
         nuc_idx = nuc_to_idx[next_nucl]
-        prob = markov_model[prev_m_nucl][nuc_idx]
+        # Handle unseen k-mers gracefully with user-specified probability
+        prob_list = markov_model.get(prev_m_nucl)
+        if prob_list is not None:
+            prob = prob_list[nuc_idx]
+        else:
+            prob = unseen_kmer_prob
         
         # Add log probability (handle case where prob is 0)
         if prob > 0:
@@ -373,12 +405,14 @@ def calculate_log_probability(sequence, markov_model, m):
     return log_prob
 
 
+
 # ===========================
 # PREDICT BINDING FOR TEST SET
 # ===========================
 # This section predicts binding labels for test sequences using log-odds scores
 
-def predict_binding(test_data, genome, markov_model_B, markov_model_U, m):
+
+def predict_binding(test_data, genome, markov_model_B, markov_model_U, m, unseen_kmer_prob=0.01):
     """
     Predict binding labels for test sequences using log-odds scores.
     
@@ -394,6 +428,7 @@ def predict_binding(test_data, genome, markov_model_B, markov_model_U, m):
     - markov_model_B: Markov model trained on bound sequences
     - markov_model_U: Markov model trained on unbound sequences
     - m: Order of Markov model
+    - unseen_kmer_prob: Probability to use for unseen k-mers (default: 0.01)
     
     Returns:
     - predictions: List of predicted labels ('B' or 'U')
@@ -419,8 +454,8 @@ def predict_binding(test_data, genome, markov_model_B, markov_model_U, m):
             continue
         
         # Calculate log probabilities under both models
-        log_prob_B = calculate_log_probability(sequence, markov_model_B, m)
-        log_prob_U = calculate_log_probability(sequence, markov_model_U, m)
+        log_prob_B = calculate_log_probability(sequence, markov_model_B, m, unseen_kmer_prob)
+        log_prob_U = calculate_log_probability(sequence, markov_model_U, m, unseen_kmer_prob)
         
         # Calculate log-odds score
         score = log_prob_B - log_prob_U
@@ -438,10 +473,12 @@ def predict_binding(test_data, genome, markov_model_B, markov_model_U, m):
     return predictions, scores, true_labels
 
 
+
 # ===========================
 # CALCULATE EVALUATION METRICS
 # ===========================
 # This section calculates TP, TN, FP, FN, ROC, and PR metrics
+
 
 def calculate_metrics(true_labels, predictions, scores):
     """
@@ -493,10 +530,12 @@ def calculate_metrics(true_labels, predictions, scores):
     return metrics
 
 
+
 # ===========================
 # SAVE RESULTS TO FILES
 # ===========================
 # This section saves models, predictions, and metrics to files
+
 
 def save_model(markov_model, markov_counts, filepath_model, filepath_counts):
     """
@@ -517,6 +556,7 @@ def save_model(markov_model, markov_counts, filepath_model, filepath_counts):
         json.dump(markov_counts, f, indent=2)
 
 
+
 def save_predictions(test_data, predictions, scores, filepath):
     """
     Save predictions to TSV file.
@@ -534,6 +574,7 @@ def save_predictions(test_data, predictions, scores, filepath):
     
     # Save to TSV
     output_df.to_csv(filepath, sep='\t', index=False)
+
 
 
 def save_metrics_csv(metrics, fold_num, output_dir, prefix):
@@ -561,6 +602,7 @@ def save_metrics_csv(metrics, fold_num, output_dir, prefix):
     })
     pr_csv_path = os.path.join(output_dir, f"{prefix}_PR_fold_{fold_num}.csv")
     pr_df.to_csv(pr_csv_path, index=False)
+
 
 
 def plot_curves(all_metrics, k, output_dir, prefix):
@@ -605,10 +647,159 @@ def plot_curves(all_metrics, k, output_dir, prefix):
     plt.close()
 
 
+
+# ===========================
+# PROCESS SINGLE FOLD (FOR PARALLEL EXECUTION)
+# ===========================
+# This function processes a single fold and can be called in parallel
+
+
+def process_single_fold(fold_num, train_idx, test_idx, data, m, pseudocount, 
+                       unseen_kmer_prob, genome_path, tf_name, chr_name, 
+                       markov_model_B_dir, markov_model_U_dir, 
+                       predicted_values_dir, outputs_dir, results_prefix):
+    """
+    Process a single fold: train models, predict, and calculate metrics.
+    This function is designed to be called in parallel.
+    
+    Args:
+    - fold_num: Fold number (1 to k)
+    - train_idx: Training indices
+    - test_idx: Testing indices
+    - data: Full dataset DataFrame
+    - m: Markov model order
+    - pseudocount: Laplace smoothing pseudocount
+    - unseen_kmer_prob: Probability for unseen k-mers
+    - genome_path: Path to genome FASTA file
+    - tf_name: Transcription factor name
+    - chr_name: Chromosome name
+    - markov_model_B_dir: Directory to save B models
+    - markov_model_U_dir: Directory to save U models
+    - predicted_values_dir: Directory to save predictions
+    - outputs_dir: Directory to save metrics
+    - results_prefix: Prefix for output filenames
+    
+    Returns:
+    - Dictionary with metrics and timing information
+    """
+    fold_start = time.time()
+    
+    print(f"\n{'-'*80}")
+    print(f"FOLD {fold_num}")
+    print(f"{'-'*80}")
+    
+    # Load genome (each worker loads its own copy)
+    genome = Fasta(genome_path)
+    
+    # Split data into train and test sets
+    train_data = data.iloc[train_idx].reset_index(drop=True)
+    test_data = data.iloc[test_idx].reset_index(drop=True)
+    
+    print(f"  Training set size: {len(train_data)}")
+    print(f"  Test set size: {len(test_data)}")
+    
+    # Initialize Markov models
+    print(f"\n  Initializing Markov models (order m={m})...")
+    markov_model_B, markov_counts_B = initialize_markov_model(m)
+    markov_model_U, markov_counts_U = initialize_markov_model(m)
+    print(f"    Models initialized with {len(markov_model_B)} k-mers")
+    
+    # Extract sequences and train models
+    print(f"\n  Extracting sequences and training models...")
+    
+    train_data_B = train_data[train_data['label'] == 'B']
+    train_data_U = train_data[train_data['label'] == 'U']
+    
+    print(f"    Bound (B) training sequences: {len(train_data_B)}")
+    print(f"    Unbound (U) training sequences: {len(train_data_U)}")
+    
+    # Extract and train B model
+    print(f"    Extracting sequences for model B...")
+    sequences_B = []
+    for idx, row in train_data_B.iterrows():
+        seq = extract_sequence(genome, row['chr'], row['start'], row['end'])
+        if seq is not None:
+            sequences_B.append(seq)
+    print(f"      Valid sequences (no N's): {len(sequences_B)}")
+    
+    print(f"    Training model B...")
+    markov_counts_B = train_markov_model(sequences_B, m, markov_counts_B)
+    markov_model_B = compute_probabilities(markov_counts_B, pseudocount)
+    
+    # Extract and train U model
+    print(f"    Extracting sequences for model U...")
+    sequences_U = []
+    for idx, row in train_data_U.iterrows():
+        seq = extract_sequence(genome, row['chr'], row['start'], row['end'])
+        if seq is not None:
+            sequences_U.append(seq)
+    print(f"      Valid sequences (no N's): {len(sequences_U)}")
+    
+    print(f"    Training model U...")
+    markov_counts_U = train_markov_model(sequences_U, m, markov_counts_U)
+    markov_model_U = compute_probabilities(markov_counts_U, pseudocount)
+    
+    # Save trained models
+    print(f"\n  Saving trained models...")
+    model_B_path = os.path.join(markov_model_B_dir, f"markov_model_{m}_fold_{fold_num}.json")
+    counts_B_path = os.path.join(markov_model_B_dir, f"markov_model_values_{m}_fold_{fold_num}.json")
+    save_model(markov_model_B, markov_counts_B, model_B_path, counts_B_path)
+    
+    model_U_path = os.path.join(markov_model_U_dir, f"markov_model_{m}_fold_{fold_num}.json")
+    counts_U_path = os.path.join(markov_model_U_dir, f"markov_model_values_{m}_fold_{fold_num}.json")
+    save_model(markov_model_U, markov_counts_U, model_U_path, counts_U_path)
+    print(f"    Models saved for fold {fold_num}")
+    
+    # Predict on test set
+    print(f"\n  Predicting on test set...")
+    predictions, scores, true_labels = predict_binding(
+        test_data, genome, markov_model_B, markov_model_U, m, unseen_kmer_prob
+    )
+    print(f"    Predictions made for {len(predictions)} sequences")
+    
+    # Calculate evaluation metrics
+    print(f"\n  Calculating evaluation metrics...")
+    metrics = calculate_metrics(true_labels, predictions, scores)
+    
+    print(f"    True Positives (TP): {metrics['TP']}")
+    print(f"    True Negatives (TN): {metrics['TN']}")
+    print(f"    False Positives (FP): {metrics['FP']}")
+    print(f"    False Negatives (FN): {metrics['FN']}")
+    print(f"    ROC AUC: {metrics['roc_auc']:.4f}")
+    print(f"    PR AUC: {metrics['pr_auc']:.4f}")
+    
+    # Save predictions and metrics
+    print(f"\n  Saving predictions and metrics...")
+    pred_path = os.path.join(predicted_values_dir, 
+                            f"{chr_name}_200bp_bins_predictions_fold_{fold_num}.tsv")
+    save_predictions(test_data, predictions, scores, pred_path)
+    
+    save_metrics_csv(metrics, fold_num, outputs_dir, results_prefix)
+    print(f"    Results saved for fold {fold_num}")
+    
+    fold_time = time.time() - fold_start
+    print(f"    Fold {fold_num} completed in {fold_time:.2f} seconds")
+    
+    # Return metrics and timing
+    return {
+        'fold': fold_num,
+        'metrics': metrics,
+        'fold_time': fold_time,
+        'confusion': {
+            'TP': metrics['TP'],
+            'TN': metrics['TN'],
+            'FP': metrics['FP'],
+            'FN': metrics['FN']
+        }
+    }
+
+
+
 # ===========================
 # MAIN FUNCTION
 # ===========================
 # This is the main function that orchestrates the entire workflow
+
 
 def main():
     """
@@ -626,17 +817,18 @@ def main():
     5. Save results and plot curves
     """
 
+
     # START TIMING
     start_time = time.time()
     start_time_readable = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(start_time))
-    print(f"Start time: {start_time_readable}\n")
-
-    args = parse_arguments()
+    
     # ----- STEP 1: PARSE COMMAND-LINE ARGUMENTS -----
     # Parse command-line arguments to get m, k, TSV file, TF name, and genome path
     print("="*80)
     print("MARKOV MODEL FOR TF BINDING SITE PREDICTION")
     print("="*80)
+    print(f"Start time: {start_time_readable}\n")
+    
     args = parse_arguments()
     
     m = args.m
@@ -645,6 +837,8 @@ def main():
     tf_name = args.tf
     genome_path = args.genome_path
     pseudocount = args.pseudocount
+    unseen_kmer_prob = args.unseen_kmer_prob
+    n_jobs = args.n_jobs
     
     # Extract chromosome number from TSV filename
     # Example: chr1_200bp_bins.tsv -> chr1
@@ -659,6 +853,8 @@ def main():
     print(f"  TSV file: {tsv_path}")
     print(f"  Genome file: {genome_path}")
     print(f"  Pseudocount: {pseudocount}")
+    print(f"  Unseen k-mer probability: {unseen_kmer_prob}")
+    print(f"  Number of parallel jobs: {n_jobs}")
     
     # ----- STEP 2: CREATE DIRECTORY STRUCTURE -----
     # Create folders for storing models and results
@@ -704,136 +900,41 @@ def main():
     print(f"PERFORMING {k}-FOLD CROSS-VALIDATION")
     print(f"{'='*80}")
     
-    # Initialize KFold splitter (sequential, no shuffle)
+    # Initialize KFold splitter
     kfold = KFold(n_splits=k, shuffle=True, random_state=42)  # Shuffle for better randomness
     
-    # Store metrics for all folds
-    all_metrics = []
-    all_confusion_matrices = []
-    fold_times = []  # track time per fold    
-
-    # Iterate through each fold
-    for fold_num, (train_idx, test_idx) in enumerate(kfold.split(data), start=1):
-        fold_start = time.time()  # start fold timer
-        print(f"\n{'-'*80}")
-        print(f"FOLD {fold_num}/{k}")
-        print(f"{'-'*80}")
-        
-        # Split data into train and test sets
-        train_data = data.iloc[train_idx].reset_index(drop=True)
-        test_data = data.iloc[test_idx].reset_index(drop=True)
-        
-        print(f"  Training set size: {len(train_data)}")
-        print(f"  Test set size: {len(test_data)}")
-        
-        # ----- STEP 5: INITIALIZE MARKOV MODELS -----
-        # Initialize separate models for B (bound) and U (unbound) sequences
-        print(f"\n  Initializing Markov models (order m={m})...")
-        markov_model_B, markov_counts_B = initialize_markov_model(m)
-        markov_model_U, markov_counts_U = initialize_markov_model(m)
-        print(f"    Models initialized with {len(markov_model_B)} k-mers")
-        
-        # ----- STEP 6: EXTRACT SEQUENCES AND TRAIN MODELS -----
-        # Extract DNA sequences from genome and train Markov models
-        print(f"\n  Extracting sequences and training models...")
-        
-        # Separate training data by label
-        train_data_B = train_data[train_data['label'] == 'B']
-        train_data_U = train_data[train_data['label'] == 'U']
-        
-        print(f"    Bound (B) training sequences: {len(train_data_B)}")
-        print(f"    Unbound (U) training sequences: {len(train_data_U)}")
-        
-        # Extract sequences for B (bound) and train model B
-        print(f"    Extracting sequences for model B...")
-        sequences_B = []
-        for idx, row in train_data_B.iterrows():
-            seq = extract_sequence(genome, row['chr'], row['start'], row['end'])
-            if seq is not None:  # Skip sequences with 'N'
-                sequences_B.append(seq)
-        print(f"      Valid sequences (no N's): {len(sequences_B)}")
-        
-        print(f"    Training model B...")
-        markov_counts_B = train_markov_model(sequences_B, m, markov_counts_B)
-        markov_model_B = compute_probabilities(markov_counts_B, pseudocount)
-        
-        # Extract sequences for U (unbound) and train model U
-        print(f"    Extracting sequences for model U...")
-        sequences_U = []
-        for idx, row in train_data_U.iterrows():
-            seq = extract_sequence(genome, row['chr'], row['start'], row['end'])
-            if seq is not None:  # Skip sequences with 'N'
-                sequences_U.append(seq)
-        print(f"      Valid sequences (no N's): {len(sequences_U)}")
-        
-        print(f"    Training model U...")
-        markov_counts_U = train_markov_model(sequences_U, m, markov_counts_U)
-        markov_model_U = compute_probabilities(markov_counts_U, pseudocount)
-        
-        # ----- STEP 7: SAVE TRAINED MODELS -----
-        # Save the trained Markov models to JSON files
-        print(f"\n  Saving trained models...")
-        
-        model_B_path = os.path.join(markov_model_B_dir, f"markov_model_{m}_fold_{fold_num}.json")
-        counts_B_path = os.path.join(markov_model_B_dir, f"markov_model_values_{m}_fold_{fold_num}.json")
-        save_model(markov_model_B, markov_counts_B, model_B_path, counts_B_path)
-        
-        model_U_path = os.path.join(markov_model_U_dir, f"markov_model_{m}_fold_{fold_num}.json")
-        counts_U_path = os.path.join(markov_model_U_dir, f"markov_model_values_{m}_fold_{fold_num}.json")
-        save_model(markov_model_U, markov_counts_U, model_U_path, counts_U_path)
-        
-        print(f"    Models saved for fold {fold_num}")
-        
-        # ----- STEP 8: PREDICT ON TEST SET -----
-        # Use trained models to predict binding on test sequences
-        print(f"\n  Predicting on test set...")
-        predictions, scores, true_labels = predict_binding(
-            test_data, genome, markov_model_B, markov_model_U, m
-        )
-        print(f"    Predictions made for {len(predictions)} sequences")
-        
-        # ----- STEP 9: CALCULATE EVALUATION METRICS -----
-        # Calculate TP, TN, FP, FN, ROC, and PR metrics
-        print(f"\n  Calculating evaluation metrics...")
-        metrics = calculate_metrics(true_labels, predictions, scores)
-        
-        print(f"    True Positives (TP): {metrics['TP']}")
-        print(f"    True Negatives (TN): {metrics['TN']}")
-        print(f"    False Positives (FP): {metrics['FP']}")
-        print(f"    False Negatives (FN): {metrics['FN']}")
-        print(f"    ROC AUC: {metrics['roc_auc']:.4f}")
-        print(f"    PR AUC: {metrics['pr_auc']:.4f}")
-        
-        # Store metrics for this fold
-        all_metrics.append(metrics)
-        all_confusion_matrices.append({
-            'fold': fold_num,
-            'TP': metrics['TP'],
-            'TN': metrics['TN'],
-            'FP': metrics['FP'],
-            'FN': metrics['FN']
-        })
-        
-        # ----- STEP 10: SAVE PREDICTIONS AND METRICS -----
-        # Save predictions and metrics to files
-        print(f"\n  Saving predictions and metrics...")
-        
-        # Save predictions
-        pred_path = os.path.join(predicted_values_dir, 
-                                f"{chr_name}_200bp_bins_predictions_fold_{fold_num}.tsv")
-        save_predictions(test_data, predictions, scores, pred_path)
-        
-        # Save ROC and PR curve data as CSV
-        results_prefix = f"{prefix}_m{m}_k{k}"
-        save_metrics_csv(metrics, fold_num, outputs_dir, results_prefix)
-        
-        print(f"    Results saved for fold {fold_num}")
-
-        fold_time = time.time() - fold_start  # NEW: end fold timer
-        fold_times.append(fold_time)
-        print(f"    Fold {fold_num} completed in {fold_time:.2f} seconds")
+    # Create results prefix
+    results_prefix = f"{prefix}_m{m}_k{k}"
     
-    # ----- STEP 11: AGGREGATE RESULTS ACROSS FOLDS -----
+    # Prepare fold data for processing
+    fold_data = []
+    for fold_num, (train_idx, test_idx) in enumerate(kfold.split(data), start=1):
+        fold_data.append((
+            fold_num, train_idx, test_idx, data, m, pseudocount, 
+            unseen_kmer_prob, genome_path, tf_name, chr_name,
+            markov_model_B_dir, markov_model_U_dir, 
+            predicted_values_dir, outputs_dir, results_prefix
+        ))
+    
+    # Process folds (parallel or serial)
+    if n_jobs > 1:
+        print(f"\nProcessing {k} folds in parallel using {n_jobs} CPU cores...")
+        with Pool(processes=n_jobs) as pool:
+            fold_results = pool.starmap(process_single_fold, fold_data)
+    else:
+        print(f"\nProcessing {k} folds serially...")
+        fold_results = [process_single_fold(*args) for args in fold_data]
+    
+    # Extract metrics from results
+    all_metrics = [result['metrics'] for result in fold_results]
+    all_confusion_matrices = [result['confusion'] for result in fold_results]
+    fold_times = [result['fold_time'] for result in fold_results]
+    
+    # Update confusion matrices to include fold number
+    for i, cm in enumerate(all_confusion_matrices):
+        cm['fold'] = i + 1
+    
+    # ----- STEP 5: AGGREGATE RESULTS ACROSS FOLDS -----
     # Calculate average metrics and plot curves
     print(f"\n{'='*80}")
     print("AGGREGATING RESULTS ACROSS ALL FOLDS")
@@ -856,14 +957,13 @@ def main():
     
     print(f"\nTotal execution time: {str(timedelta(seconds=int(total_time)))}")
     
-    # ----- STEP 12: PLOT AND SAVE CURVES -----
+    # ----- STEP 6: PLOT AND SAVE CURVES -----
     # Plot ROC and PR curves for all folds
     print(f"\nPlotting ROC and PR curves...")
-    results_prefix = f"{prefix}_m{m}_k{k}"
     plot_curves(all_metrics, k, outputs_dir, results_prefix)
     print(f"  Plots saved in {outputs_dir}")
     
-    # ----- STEP 13: SAVE SUMMARY STATISTICS -----
+    # ----- STEP 7: SAVE SUMMARY STATISTICS -----
     # Save summary statistics to a text file
     print(f"\nSaving summary statistics...")
     summary_path = os.path.join(outputs_dir, f"{results_prefix}_summary.txt")
@@ -885,7 +985,9 @@ def main():
         f.write(f"  Chromosome: {chr_name}\n")
         f.write(f"  Markov Model Order (m): {m}\n")
         f.write(f"  Number of Folds (k): {k}\n")
-        f.write(f"  Pseudocount: {pseudocount}\n\n")
+        f.write(f"  Pseudocount: {pseudocount}\n")
+        f.write(f"  Unseen k-mer probability: {unseen_kmer_prob}\n")
+        f.write(f"  Number of parallel jobs: {n_jobs}\n\n")
         f.write(f"Results:\n")
         f.write(f"  Average ROC AUC: {avg_roc_auc:.4f}\n")
         f.write(f"  Average PR AUC: {avg_pr_auc:.4f}\n\n")
@@ -911,26 +1013,15 @@ def main():
     print()
 
 
+
 # ===========================
 # ENTRY POINT
 # ===========================
 # This ensures main() runs only when the script is executed directly
 
+
 if __name__ == "__main__":
     main()
 
+
 # ------ End of Script ------
-
-'''
-# Kindly install the required packages before running the script:
-pip install numpy pandas matplotlib scikit-learn pyfaidx
-
-# Run the script
-python cfg_project_markov_model_intermediate_milestone.py \
-    --m 6 \
-    --k 5 \
-    --tsv data/chr4_200bp_bins.tsv \
-    --tf CTCF \
-    --genome_path genome.fa \
-    --pseudocount 0.01
-'''
