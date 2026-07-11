@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Simpler_Version.py
+simpler_version.py
 
 Takes 2 arguments: FASTA file and Markov model order m
 Trains a Markov model on all sequences and prints log likelihood scores
 
 To run the code:
-python Simpler_Version.py <fasta_file> <m>
+python simpler_version.py <fasta_file> <m>
 
 """
 
@@ -135,7 +135,7 @@ def calculate_log_probability(sequence, markov_model, m):
 def main():
     """Main function"""
     if len(sys.argv) != 3:
-        print("Usage: python Simpler_Version.py <fasta_file> <m>", file=sys.stderr)
+        print("Usage: python simpler_version.py <fasta_file> <m>", file=sys.stderr)
         sys.exit(1)
     
     fasta_file = sys.argv[1]
