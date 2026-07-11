@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-tf_binding_pipeline_gb_neighbors_v2.py
+tf_binding_pipeline.py
 
 TF binding prediction pipeline using Gradient Boosting
 with configurable neighboring bin ATAC context features.
@@ -14,7 +14,7 @@ For CTCF and REST, FIMO features are always included regardless of --neighbors.
 
 Usage (run one TF at a time to save memory):
     # ±1 neighbor
-    python tf_binding_pipeline_gb_neighbors_v2.py --neighbors 1 \
+    python TF_Binding_Pipeline.py --neighbors 1 \
         --data-dir data \
         --train-chromosomes 1 2 4 5 6 7 8 9 11 12 13 14 15 16 18 19 20 21 22 \
         --predict-chromosomes 3 10 17 \
