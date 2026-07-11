@@ -14,7 +14,7 @@ For CTCF and REST, FIMO features are always included regardless of --neighbors.
 
 Usage (run one TF at a time to save memory):
     # ±1 neighbor
-    python TF_Binding_Pipeline.py --neighbors 1 \
+    python tf_binding_pipeline.py --neighbors 1 \
         --data-dir data \
         --train-chromosomes 1 2 4 5 6 7 8 9 11 12 13 14 15 16 18 19 20 21 22 \
         --predict-chromosomes 3 10 17 \
