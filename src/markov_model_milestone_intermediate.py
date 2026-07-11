@@ -1,5 +1,5 @@
 """
-cfg_project_markov_model_intermediate_milestone.py
+markov_model_milestone_intermediate.py
 
 
 Markov Model-based Transcription Factor Binding Site Predictor
