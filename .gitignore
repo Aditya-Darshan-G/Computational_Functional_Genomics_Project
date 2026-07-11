@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Local genome files
+hg38.fa
+hg38.fa.gz
+*.fai
+
+# Windows metadata
+*:Zone.Identifier
+
+# Temporary outputs
+*.log
+.DS_Store
+Thumbs.db
