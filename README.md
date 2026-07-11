@@ -1,96 +1,53 @@
-Predicts transcription factor binding sites using Markov models with k-fold cross-validation.
+# Predicting Transcription Factor Binding Potential from Genomic Bins
 
-## Requirements
+This repository contains our course project for **Computational Functional Genomics at IISER Pune**. The project focuses on predicting the in vivo binding potential of three transcription factors — **CTCF, REST, and EP300** — in the **K562 cell line**.
 
-```bash
-pip install numpy pandas matplotlib scikit-learn pyfaidx
-```
+The task was motivated by the limitation of sequence-only motif models such as position weight matrices (PWMs). While PWMs capture in vitro DNA-binding preferences, they often fail to fully explain in vivo binding because transcription factor occupancy also depends on chromatin accessibility, genomic context, cell type, cooperative binding, and other regulatory factors.
 
-Python: 3.7+
+## Project Goal
 
-## Data Requirements
+The goal was to predict binding scores for **CTCF, REST, and EP300** on held-out genomic regions from chromosomes:
 
-### 1. Human Genome (hg38)
+- `chr3`
+- `chr10`
+- `chr17`
 
-Download from UCSC Genome Browser:
+Each genomic region was represented as a 200 bp bin. For the prediction chromosomes, the transcription factor labels were hidden, and the model was required to output a binding score/probability for each TF.
 
-```bash
-wget https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz
-gunzip hg38.fa.gz
-```
+The final output files contain predicted binding scores where larger values indicate higher predicted binding potential.
 
-### 2. TSV Input File
+## Dataset
 
-Format: `chr<N>_200bp_bins.tsv`
+The dataset consists of 200 bp genomic bins from the human genome build `hg38`.
+
+Each training chromosome file contains:
+
+| Column | Description |
+|---|---|
+| `chr` | Chromosome |
+| `start` | Start coordinate of the 200 bp bin |
+| `end` | End coordinate of the 200 bp bin |
+| `ATAC` | Chromatin accessibility status |
+| `CTCF` | Binding status for CTCF |
+| `REST` | Binding status for REST |
+| `EP300` | Binding status for EP300 |
+
+The labels use:
+
+- `B` = bound / accessible
+- `U` = unbound / inaccessible
+
+The chromosomes `chr3`, `chr10`, and `chr17` contain only the genomic coordinates and ATAC status, and were used for final prediction.
+
+## Methods
+
+The project had two main stages.
+
+### 1. Intermediate Milestone: Markov Model Classifier
+
+For the intermediate milestone, we implemented a Markov model-based classifier from scratch.
+
+The script:
 
 ```text
-chr     start   end     ATAC    CTCF    REST    EP300
-chr4    0       200     U       B       U       U
-chr4    200     400     U       U       B       U
-```
-
-Columns: chr, start, end, ATAC, CTCF, REST, EP300
-
-Labels: B (bound) or U (unbound)
-
-## File Structure
-
-```text
-project/
-├── cfg_project_markov_model_intermediate_milestone.py
-├── data/
-│   └── chr4_200bp_bins.tsv
-├── hg38.fa
-└── outputs/                          # Created automatically
-    ├── CTCF_chr4_markov_model_B/     # Bound models
-    ├── CTCF_chr4_markov_model_U/     # Unbound models
-    ├── CTCF_chr4_predicted_values/   # Predictions per fold
-    └── CTCF_chr4_outputs/            # Metrics & plots
-```
-
-## Usage
-
-### Basic Run
-
-```bash
-python cfg_project_markov_model_intermediate_milestone.py     --m 6     --k 5     --tsv data/chr4_200bp_bins.tsv     --tf CTCF     --genome_path hg38.fa
-```
-
-### With All Parameters
-
-```bash
-python cfg_project_markov_model_intermediate_milestone.py     --m 6     --k 5     --tsv data/chr4_200bp_bins.tsv     --tf CTCF     --genome_path hg38.fa     --pseudocount 0.01     --unseen_kmer_prob 0.01     --n_jobs 4
-```
-
-## Parameters
-
-| Parameter | Required | Default | Description |
-|---|---:|---:|---|
-| `--m` | ✓ | - | Markov model order (0-10) |
-| `--k` | ✓ | - | Number of CV folds (3-5) |
-| `--tsv` | ✓ | - | Path to TSV input file |
-| `--tf` | ✓ | - | TF name: CTCF, REST, or EP300 |
-| `--genome_path` | ✓ | - | Path to hg38.fa |
-| `--pseudocount` | ✗ | 0.01 | Laplace smoothing value |
-| `--unseen_kmer_prob` | ✗ | 0.01 | Probability for unseen k-mers |
-| `--n_jobs` | ✗ | 1 | CPU cores (use >1 for parallel) |
-
-## Output Files
-
-Per fold (in `{TF}_{chr}_outputs/`):
-
-- `{TF}_{chr}_m{m}_k{k}ROC_fold{N}.csv` - ROC curve data
-- `{TF}_{chr}_m{m}_k{k}PR_fold{N}.csv` - PR curve data
-
-Aggregate:
-
-- `{TF}_{chr}_m{m}_k{k}_ROC_all_folds.png` - Combined ROC plot
-- `{TF}_{chr}_m{m}_k{k}_PR_all_folds.png` - Combined PR plot
-- `{TF}_{chr}_m{m}_k{k}_summary.txt` - Performance summary
-
-Models (JSON):
-
-- `{TF}{chr}markov_model{B|U}/markov_model{m}fold{N}.json`
-- `{TF}{chr}markov_model{B|U}/markov_model_values{m}fold{N}.json`
-
-End Of File
+src/Markov_Model_Milestone_Intermediate.py
