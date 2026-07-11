@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-simplerVersion.py
+Simpler_Version_Final_code.py
 
 Takes 2 arguments: FASTA file and Markov model order m
 Trains a Markov model on all sequences and prints log likelihood scores
