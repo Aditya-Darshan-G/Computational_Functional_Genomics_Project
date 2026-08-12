@@ -260,15 +260,6 @@ To reproduce the intermediate milestone, an indexed **hg38 FASTA** file is requi
 
 To reproduce the final CTCF and REST models exactly, the corresponding FIMO output files and the same neighbour-window setting must also be supplied.
 
-## Course context
-
-This work was completed for the **Computational Functional Genomics** course at **IISER Pune**.
-
-The course project consisted of:
-
-1. an intermediate Markov model-based classifier evaluated using ROC and precision-recall curves; and
-2. a final pipeline that generated CTCF, REST, and EP300 binding scores for chromosomes 3, 10, and 17.
-
 ## Data and licensing
 
 The source code in this repository is released under the terms in the repository's `LICENSE` file.
